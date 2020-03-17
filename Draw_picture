@@ -1,0 +1,90 @@
+import networkx as nx
+import matplotlib.pyplot as plt
+import pymysql
+
+
+def get_id(cursor):
+    sql = 'select teacher_id1, teacher_id2 from search_article.cooperation'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+def search_article_sum(cursor, id):
+    sql = 'select Article_Sum from search_article.teacher where Teacher_ID = ' + "'" + id + "'" + ';'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+def search_count(cursor):
+    sql = 'select teacher_id1, teacher_id2, count from search_article.cooperation;'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+if __name__ == '__main__':
+    # 节点大小
+    node_size = []
+    # 节点的颜色
+    node_color = []
+    # 边的宽度
+    edges_width = []
+    # 边的样式
+    edges_style = []
+    # 边的颜色
+    edges_color = []
+    connect = pymysql.connect(host='localhost', port=3306, user='root', passwd='', db='Search_article', charset='utf8')
+    cursor = connect.cursor()
+    ids = get_id(cursor)
+    teacher = []
+    j = 0
+    # 将老师 id 存入列表
+    for i in range(len(ids)):
+        teacher.insert(j, ids[i][0])
+        j += 1
+        teacher.insert(j, ids[i][1])
+        j += 1
+    # 节点去重
+    nodes = list(set(teacher))
+    # 将点关系转化成列表
+    edges = list(ids)
+    for i in range(len(nodes)):
+        article_sum = search_article_sum(cursor, nodes[i])
+        article_sum = str(article_sum).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+        article_sum = int(article_sum)
+        if article_sum == 0:
+            article_sum = 1
+        node_size.append(article_sum/2)
+        if article_sum/2 > 100:
+            color = 'orangered'
+        elif article_sum/2 > 80:
+            color = 'grey'
+        elif article_sum/2 > 60:
+            color = 'orange'
+        elif article_sum/2 > 40:
+            color = 'greenyellow'
+        elif article_sum/2 > 20:
+            color = 'darkseagreen'
+        elif article_sum/2 >= 0:
+            color = 'cyan'
+        node_color.append(color)
+    cooperation = search_count(cursor)
+    for i in range(len(cooperation)):
+        edges_width.append(cooperation[i][2]/10)
+        if cooperation[i][2] < 5:
+            style = 'dashed'
+            edges_style.append(style)
+            color = 'purple'
+            edges_color.append(color)
+        else:
+            style = 'solid'
+            edges_style.append(style)
+            color = 'red'
+            edges_color.append(color)
+    print(edges)
+    print(node_size)
+    print(edges_width)
+    print(edges_style)
+    G = nx.Graph()
+    G.add_edges_from(edges)
+    nx.draw_networkx(G, pos=nx.random_layout(G), node_color=node_color, node_size=node_size, node_shape='o', edge_color=edges_color, width=edges_width, style=edges_style, with_labels=False)
+    plt.show()
