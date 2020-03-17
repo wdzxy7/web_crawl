@@ -1,0 +1,120 @@
+import pymysql
+import queue
+import time
+
+
+# 获取所有单位中含有北方工业大学的论文
+def show_teacher_id(cursor):
+    sql = 'select Article_ID from search_article.search_result where Unit REGEXP' + "'北方工业大学'" + ';'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+# 查找该文章老师名字
+def search(cursor, id):
+    id = str(id)
+    sql = 'select author from search_article.article_author where Article_ID =' + id + ';'
+    cursor.execute(sql)
+    teacher = cursor.fetchall()
+    return teacher
+
+
+# 运用老师名字去表中查找老师id
+def find_id(cursor, name):
+    sql = 'select Teacher_ID from search_article.teacher where Teacher_name =' + name + ';'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+# 在合作表中查找更新或者新增
+def store_cooperation(cursor, id1, id2):
+    sql1 = 'select count from search_article.cooperation where teacher_id1 =' + id1 + ' AND ' + 'teacher_id2=' + id2 + ';'
+    sql2 = 'select count from search_article.cooperation where teacher_id1 =' + id2 + ' AND ' + 'teacher_id2=' + id1 + ';'
+    sql3 = 'INSERT INTO search_article.cooperation (teacher_id1, teacher_id2, count) VALUES (%s, %s, 1)'
+
+    cursor.execute(sql1)
+    result1 = cursor.fetchall()
+
+    cursor.execute(sql2)
+    result2 = cursor.fetchall()
+    if result1:
+        count = int(str(result1[0]).replace("(", "").replace(")", "").replace(",", "")) + 1
+        sql = 'update search_article.cooperation set count=%s where teacher_id1 =' + id1 + ' AND ' + 'teacher_id2=' + id2 + ';'
+        cursor.execute(sql, count)
+    elif result2:
+        count = int(str(result2[0]).replace("(", "").replace(")", "").replace(",", "")) + 1
+        sql = 'update search_article.cooperation set count=%s where teacher_id1 =' + id2 + ' AND ' + 'teacher_id2=' + id1 + ';'
+        cursor.execute(sql, count)
+    # 都没有查询到就新增
+    else:
+        id1 = str(id1).replace("'", "")
+        id2 = str(id2).replace("'", "")
+        cursor.execute(sql3, (id1, id2))
+    return
+
+
+# 出现同名老师用论文id查找老师id
+def search_teacher_id(cursor , id, name_id):
+    sql = 'select Teacher_ID from search_article.academic_teacher_num where Article_ID =' + id + ';'
+    cursor.execute(sql)
+    k = cursor.fetchall()
+    for i in range(len(k)):
+        temp = str(k[i]).replace(",", "").replace("'", "").replace("(", "'").replace(")", "'")
+        if temp == str(name_id):
+            return temp
+    return
+
+
+if __name__ == '__main__':
+    localtime = time.asctime(time.localtime(time.time()))
+    print(localtime)
+    connect = pymysql.connect(host='localhost', port=3306, user='root', passwd='', db='Search_article', charset='utf8')
+    cursor = connect.cursor()
+    Article_id = queue.Queue()
+    teacher = queue.Queue()
+    ids = show_teacher_id(cursor)
+    store_id = []
+    tid = []
+    for i in range(len(ids)):
+        temp = str(ids[i]).replace(",", "").replace("'", "").replace("(", "'").replace(")", "'")
+        Article_id.put(temp)
+    # 每次取一个论文id 去寻找作者
+    while not Article_id.empty():
+        # print(Article_id.qsize())
+        tid.clear()
+        id = Article_id.get()
+        teachers = search(cursor, id)
+        store_id.clear()
+        m = 0
+        n = 0
+        # 处理获取的论文老师名字并存入队列
+        for i in range(len(teachers)):
+            temp = str(teachers[i]).replace(",", "").replace("'", "").replace("(", "'").replace(")", "'")
+            teacher.put(temp)
+        # 获取该论文老师ID
+        while not teacher.empty():
+            tid.clear()
+            name = teacher.get()
+            # print(name)
+            # 用名字去表中查找id存入tid
+            temp = find_id(cursor, name)
+            for j in range(len(temp)):
+                jk = str(temp[j]).replace(",", "").replace("'", "").replace("(", "'").replace(")", "'")
+                tid.insert(n, jk)
+            # 没有同名
+            if len(tid) == 1:
+                store_id.insert(m, tid[0])
+            # 出现同名
+            else:
+                for k in range(len(tid)):
+                    teacher_id = search_teacher_id(cursor, id, tid[k])
+                    if teacher_id == tid[k]:
+                        store_id.insert(m, teacher_id)
+        if len(store_id) == 0:
+            print('article id =', id)
+        for i in range(len(store_id)):
+            for j in range(i + 1, len(store_id)):
+                if store_id[i] != store_id[j]:
+                    store_cooperation(cursor, store_id[i], store_id[j])
+    localtime = time.asctime(time.localtime(time.time()))
+    print(localtime)
