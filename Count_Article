@@ -1,0 +1,41 @@
+import pymysql
+import queue
+
+
+def show_teacher_id(connect):
+    cursor = connect.cursor()
+    sql = 'select Teacher_ID from search_article.teacher;'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+def total(id, connect):
+    cursor = connect.cursor()
+    sql = 'select Article_ID from search_article.academic_teacher_num where Teacher_ID=' + id + ';'
+    try:
+        cursor.execute(sql)
+        temp = cursor.fetchall()
+    except Exception as e:
+        print("error is " + str(e))
+        temp = []
+    # 转化存入队列
+    return len(temp)
+
+
+def updata(sum, connect, id):
+    cursor = connect.cursor()
+    sql = 'update search_article.teacher set Article_Sum=%s where Teacher_ID=' + id + ';'
+    cursor.execute(sql, int(sum))
+
+
+if __name__ == '__main__':
+    teacher_id = queue.Queue()
+    connect = pymysql.connect(host='localhost', port=3306, user='root', passwd='', db='Search_article', charset='utf8')
+    ids = show_teacher_id(connect)
+    for i in range(len(ids)):
+        temp = str(ids[i]).replace(",", "").replace("'", "").replace("(", "'").replace(")", "'")
+        teacher_id.put(temp)
+    while not teacher_id.empty():
+        id = teacher_id.get()
+        sum = int(total(id, connect))
+        updata(sum, connect, id)
