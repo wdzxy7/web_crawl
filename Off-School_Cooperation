@@ -1,0 +1,61 @@
+import pymysql
+import queue
+
+
+def show_Unit(cursor, article):
+    sql = "select Unit from search_article.search_result where Article_ID = " + "'" + article + "'" + ";"
+    cursor.execute(sql)
+    t = cursor.fetchall()
+    unit = str(t).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+    if len(unit) > 35:
+        return 1
+    else:
+        return 0
+
+
+def search_article_id(cursor, teacher):
+    sql = "select Article_ID from search_article.academic_teacher_num where Teacher_ID= " + "'" + teacher + "'" + ";"
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+def updta(cursor, teacher, count):
+    sql = "select Foreign_school_cooperation from search_article.teacher where Teacher_ID = " + "'" + teacher + "'" + ";"
+    try:
+        cursor.execute(sql)
+        result = cursor.fetchall()
+        count = int(str(result[0]).replace("(", "").replace(")", "").replace(",", "") + '0') + count
+    except Exception as e:
+        print("error is " + str(e))
+    sql = "update search_article.teacher set Foreign_school_cooperation=%s where Teacher_ID =" + "'" + teacher + "'" + ";"
+    cursor.execute(sql, count)
+
+
+def get_teacher_id(cursor):
+    sql = 'select Teacher_ID from search_article.teacher;'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+if __name__ == '__main__':
+    connect = pymysql.connect(host='localhost', port=3306, user='root', passwd='', db='Search_article', charset='utf8')
+    cursor = connect.cursor()
+    teacher_id = queue.Queue()
+    article_id = queue.Queue()
+    teachers = get_teacher_id(cursor)
+    for i in range(len(teachers)):
+        temp = str(teachers[i]).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+        teacher_id.put(temp)
+    while not teacher_id.empty():
+        count = 0
+        teacher = teacher_id.get()
+        articles = search_article_id(cursor, teacher)
+        for i in range(len(articles)):
+            temp = str(articles[i]).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+            article_id.put(temp)
+        while not article_id.empty():
+            article = article_id.get()
+            if show_Unit(cursor, article):
+                count = count + 1
+        print("*-*--*-*-*-*-*-*")
+        updta(cursor, teacher, count)
