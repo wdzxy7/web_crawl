@@ -1,0 +1,65 @@
+import pymysql
+
+
+def select(cursor):
+    sql = 'select teacher_id1,teacher_id2,count from search_article.cooperation;'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+def search_college(cursor, teacher):
+    sql = 'select College_number from search_article.teacher where Teacher_ID =' + "'" + teacher + "'" + ';'
+    cursor.execute(sql)
+    college = cursor.fetchall()
+    college = str(college).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+    return college
+
+
+def search_name(cursor, college):
+    sql = 'select college_name from search_article.college where college_number = ' + "'" + college + "'" + ';'
+    cursor.execute(sql)
+    name = cursor.fetchall()
+    name = str(name).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+    return name
+
+
+def store(cursor, name1, name2, count):
+    sql1 = 'select cooperation_sum from search_article.college_cooperation where college1 =' + "'" + name1 + "'" + ' AND ' + 'college2 =' + "'" + name2 + "'" + ';'
+    sql2 = 'select cooperation_sum from search_article.college_cooperation where college1 =' + "'" + name2 + "'" + ' AND ' + 'college2 =' + "'" + name1 + "'" + ';'
+    cursor.execute(sql1)
+    result1 = cursor.fetchall()
+    result1 = str(result1).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+    cursor.execute(sql2)
+    result2 = cursor.fetchall()
+    result2 = str(result2).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+    if result1:
+        sum = int(result1) + count
+        sql = 'update search_article.college_cooperation set cooperation_sum = %s where college1 =' + "'" + name1 + "'" + ' AND ' + 'college2 =' + "'" + name2 + "'" + ';'
+        cursor.execute(sql, sum)
+    elif result2:
+        sum = int(result2) + count
+        sql = 'update search_article.college_cooperation set cooperation_sum = %s where college1 =' + "'" + name2 + "'" + ' AND ' + 'college2 =' + "'" + name1 + "'" + ';'
+        cursor.execute(sql, sum)
+    else:
+        sql = 'INSERT INTO search_article.college_cooperation (college1, college2, cooperation_sum) VALUES (%s, %s, %s)'
+        cursor.execute(sql, (name1, name2, count))
+    return
+
+
+if __name__ == '__main__':
+    connect = pymysql.connect(host='localhost', port=3306, user='root', passwd='', db='Search_article', charset='utf8')
+    cursor = connect.cursor()
+    result = select(cursor)
+    teacher1 = []
+    teacher2 = []
+    count = []
+    for i in range(len(result)):
+        teacher1.append(result[i][0])
+        teacher2.append(result[i][1])
+        count.append(result[i][2])
+    for i in range(len(count)):
+        college1 = search_college(cursor, teacher1[i])
+        college2 = search_college(cursor, teacher2[i])
+        name1 = search_name(cursor, college1)
+        name2 = search_name(cursor, college2)
+        store(cursor, name1, name2, count[i])
