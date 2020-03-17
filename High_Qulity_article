@@ -1,0 +1,47 @@
+import pymysql
+import queue
+
+
+def show_article_id(cursor):
+    sql = "select Article_ID from search_article.search_result where Indexed != '';"
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+def search_teacher_id(cursor, article_id):
+    sql = "select Teacher_ID from search_article.academic_teacher_num where Article_ID = " + article_id + ";"
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+def updta(cursor, teacher):
+    count = 0
+    sql = "select high_qulity_article from search_article.teacher where Teacher_ID = " + "'" + teacher + "'" + ";"
+    try:
+        cursor.execute(sql)
+        result = cursor.fetchall()
+        count = int(str(result).replace("(", "").replace(")", "").replace(",", "") + '0') + 1
+    except Exception as e:
+        print("error is " + str(e))
+    sql = "update search_article.teacher set high_qulity_article=%s where Teacher_ID =" + "'" + teacher + "'" + ";"
+    cursor.execute(sql, count)
+
+
+if __name__ == '__main__':
+    article_id = queue.Queue()
+    teacher_id = queue.Queue()
+    connect = pymysql.connect(host='localhost', port=3306, user='root', passwd='', db='Search_article', charset='utf8')
+    cursor = connect.cursor()
+    article_ids = show_article_id(cursor)
+    for i in range(len(article_ids)):
+        temp = str(article_ids[i]).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+        article_id.put(temp)
+    while not article_id.empty():
+        id = article_id.get()
+        teachers = search_teacher_id(cursor, id)
+        for i in range(len(teachers)):
+            temp = str(teachers[i]).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+            teacher_id.put(temp)
+        while not teacher_id.empty():
+            teacher = teacher_id.get()
+            updta(cursor, teacher)
