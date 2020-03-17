@@ -1,0 +1,288 @@
+import re
+import urllib.request
+import urllib
+from urllib.parse import quote_plus
+from requests.exceptions import RequestException
+import requests
+from openpyxl import Workbook
+import threading
+import queue
+import xlrd
+import time
+from bs4 import BeautifulSoup
+import pymysql
+
+
+class Search(threading.Thread):
+    def __init__(self, row, begin, end):
+        threading.Thread.__init__(self)
+        self.q_id = queue.Queue()
+        self.q_name = queue.Queue()
+        self.q_url = queue.Queue()
+        self.alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        self.wb = Workbook()
+        self.excle = self.wb.active
+        self.row = row
+        self.count = 2
+        self.begin = begin
+        self.end = end
+        self.num = row
+        self.read_excel = xlrd.open_workbook('万维论文.xlsx')
+        self.sheet = self.read_excel.sheet_by_name("Sheet1")
+        self.connect = pymysql.connect(host='localhost', port=3306, user='root', passwd='', db='Search_article', charset='utf8')
+
+    def run(self) -> None:
+        print("当前线程：%d" % self.row)
+        self.creat_excle()
+        # 获取论文名字和对应链接zip存入队列
+        for i in range(self.begin, self.end+1):
+            self.show_excle_message(i)
+        while not self.q_name.empty():
+            p = ''
+            c = ''
+            unit = ''
+            url = str(self.q_url.get())
+            id = self.q_id.get()
+            article_name = str(self.q_name.get())
+            self.store(id, self.alpha[1])
+            self.store(article_name, self.alpha[0])
+            back = self.search_url(url)
+            url = 'http://www.wanfangdata.com.cn' + back
+            if url != 'http://www.wanfangdata.com.cn':
+                author, journal, units = self.crawl(url, article_name)
+                if units:
+                    for i in range(len(units)):
+                        unit = unit + str(units[i])
+                        if i < len(units) - 1:
+                            unit = unit + ','
+                else:
+                    unit = '没有文章'
+                self.mysql_store(self.connect, id, article_name, unit)
+                if unit:
+                    self.store(unit, self.alpha[2])
+                if author:
+                    idx = 4
+                    for p in author:
+                        self.store(p, self.alpha[idx])
+                        self.mysql_store_author(self.connect, id, p)
+                        idx = idx + 1
+                else:
+                    p = '没有找到作者'
+                    idx = 3
+                    self.store(p, self.alpha[idx])
+                if journal:
+                    for c in journal:
+                        self.store(c, self.alpha[3])
+                else:
+                    c = '没有找到期刊'
+                    self.store(c, self.alpha[3])
+                if p == '没有找到作者' and c == '没有找到期刊':
+                    char = '没有找到相关信息'
+                    self.store(char, self.alpha[2])
+                    self.store(char, self.alpha[3])
+                    self.store(char, self.alpha[4])
+            else:
+                unit = '没有文章'
+                self.mysql_store(self.connect, id, article_name, unit)
+                char = '没有找到此文章'
+                self.store(char, self.alpha[2])
+                self.store(char, self.alpha[3])
+            self.count = self.count + 1
+        file = '搜索结果' + str(self.num) + '.xlsx'
+        self.wb.save(file)
+        self.connect.close()
+        print("退出线程：" + str(self.row))
+
+    # 创建储存论文
+    def creat_excle(self):
+        self.excle['A1'] = '论文名称'
+        self.excle['B1'] = 'ID'
+        self.excle['C1'] = '作者单位'
+        self.excle['D1'] = '刊名'
+        self.excle['E1'] = '作者'
+        return
+
+    # 往q_package队列写入论文名字i
+    def show_excle_message(self, i):
+        id = self.sheet.cell_value(i-1, 0)
+        name = self.sheet.cell_value(i-1, 3)
+        name = str(name)
+        if id:
+            id = str(int(id))
+        else:
+            id = '0000' + str(i)
+        self.q_id.put(id)
+        if name == 'None':
+            '''
+            print("do not have name")
+            '''
+        else:
+            self.q_name.put(name)
+            name = urllib.parse.quote(name)
+            url = 'http://www.wanfangdata.com.cn/search/searchList.do?searchType=all&showType=&pageSize=&searchWord=' + name + '&isTriggerTag='
+            self.q_url.put(url)
+        return
+
+    # 获取指定q_article_name_url中的url并进行爬取
+    def search_url(self, url):
+        s1 = ''
+        html = self.get_html(url)
+        if html:
+            match_url = re.compile(r'<div class="ResultCont">(.*?)</div>', re.S)
+            ur = match_url.findall(html)
+        else:
+            return s1
+        s = ''.join(ur)
+        new_url = ''
+        if ur:
+            first_match = re.compile(r'</span>(.*?) target="_blank"', re.S)
+            old_url = first_match.findall(s)
+            if old_url:
+                s2 = ''.join(old_url)
+                finall_match = re.compile(r'href="(.*?)"', re.S)
+                new_url = finall_match.findall(s2)
+        if len(new_url) != 0:
+            s3 = ''.join(new_url[0])
+        else:
+            s3 = ''
+        return s3
+
+    # 在最终网页进行爬取所需信息
+    def crawl(self, url, article_name):
+        html = urllib.request.urlopen(url).read().decode('utf-8')
+        re_comment = re.compile('<!--.*?-->', re.S)
+        html = re_comment.sub("", html)
+        match_title = re.compile(r'<font style="font-weight:bold;">(.*?)</font>')
+        match_journal = re.compile(r'<a href="#".*?onclick="navigaPerio.*?">(.*?)</a>')
+        title = match_title.findall(html)
+        name = self.search_names(html)
+        journal = match_journal.findall(html)
+        compile_title = ''.join(title)
+        article_name = article_name.replace("\n", "").replace("\r", "").replace(" ", "")
+        compile_title = compile_title.replace(" ", "").replace("\"", "").replace("“", "").replace("”", "")
+        print(article_name)
+        units = self.search_unit(url)
+        if compile_title.lower() != article_name.lower():
+            return None, None, None
+        if len(journal) == 0:
+            match_journal = re.compile(r'<.*?class="college" onclick="search_perio.*?>(.*?)</a>', re.S)
+            journal = match_journal.findall(html)
+        if len(name) == 0 or len(journal) == 0:
+            if len(name) != 0:
+                return name, None, units
+            if len(journal) != 0:
+                return None, journal, units
+        return name, journal, units
+
+    # 信息存入excle
+    def store(self, string, col):
+        key = col + str(self.count)
+        self.excle[key] = string
+        return
+
+    # 获取网页thml
+    def get_html(self, url):
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.162 Safari/537.36'
+            }
+            response = requests.get(url, headers=headers)
+            response.encoding = 'utf-8'
+            if response.status_code == 200:
+                return response.text
+            return None
+        except RequestException:
+            return None
+
+    def search_names(self, html):
+        soup = BeautifulSoup(html, "html.parser")
+        a = soup.find_all('a', {'id': re.compile(r'card\d')})
+        list1 = []
+        i = 0
+        for names in a:
+            for s in names.stripped_strings:
+                list1.insert(i, s)
+        return list1
+
+    def search_unit(slef, url):
+        html = slef.get_html(url)
+        list = []
+        i = 0
+        soup = BeautifulSoup(html, "html.parser")
+        div = soup.find_all('div', attrs={'class': 'info_right info_right_newline'})
+        for units in div:
+            unit = units.find_all('a', re.compile(r'unit_nameType\d'))
+            if unit:
+                for a in unit:
+                    list.insert(i, a.contents[0])
+        # 信息在div里面标志为id
+        if len(list) == 0:
+            divs = soup.find_all('div', attrs={'id': re.compile(r'unit_nameType\d')})
+            for div in divs:
+                list.insert(i, div.contents[0])
+        # 信息在div里面标志为title和class
+        if len(list) == 0:
+            divs = soup.find_all('div', attrs={'title': '知识脉络分析', 'class': 'author'})
+            for div in divs:
+                list.insert(i, div.contents[0])
+        # 信息在a里面标准为class
+        if len(list) == 0:
+            divs = soup.find_all('a', attrs={'class': re.compile(r'unit_nameType\d')})
+            for div in divs:
+                list.insert(i, div.contents[0])
+        return list
+
+    def mysql_store(self, connect, id, article_name, units):
+        unit = str(units)
+        cursor = self.connect.cursor()
+        sql = "INSERT INTO search_article.search_result (Article_ID, Article_name, Unit) VALUES (%s, %s, %s)"
+        try:
+            cursor.execute(sql, (id, article_name, unit))
+            connect.commit()
+        except Exception as e:
+            print("error is " + str(e))
+        cursor.close()
+        return
+
+    def mysql_store_author(self, connect, id, author):
+        cursor = self.connect.cursor()
+        sql = "INSERT INTO search_article.article_author (Article_ID, author) VALUES (%s, %s)"
+        try:
+            cursor.execute(sql, (id, author))
+            connect.commit()
+        except Exception as e:
+            print("error is " + str(e))
+        cursor.close()
+        return
+
+
+if __name__ == '__main__':
+    localtime = time.asctime(time.localtime(time.time()))
+    print(localtime)
+    data = xlrd.open_workbook('万维论文2.xlsx')
+    sheet = data.sheet_by_name("Sheet1")
+    ts = []
+    # 获取总信息数
+    sum = sheet.nrows + 1
+    # 开启线程数
+    x = 32
+    # 一个线程应处理数据数
+    average = int(sum/x)
+    # 创建线程
+    begin = 2
+    end = average
+    count = 1
+    while begin <= sum:
+        t = Search(count, begin, end)
+        ts.append(t)
+        begin = begin + average
+        end = end + average
+        count = count + 1
+        if end > sum:
+            end = sum + 1
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    localtime = time.asctime(time.localtime(time.time()))
+    print(localtime)
