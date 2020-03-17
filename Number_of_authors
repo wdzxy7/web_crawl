@@ -1,0 +1,94 @@
+import pymysql
+import queue
+
+# years 表示取哪一年的
+years = 2013
+
+
+def select_teacher(cursor):
+    sql = 'select search_article.teacher.Teacher_ID from search_article.teacher;'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+def select_article(cursor, teacher_id):
+    sql = 'select Article_ID from search_article.academic_teacher_num where Teacher_ID =' + teacher_id + ';'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+def select_author(cursor, teacher_id):
+    sql = 'select Authororder from search_article.academic_teacher_num where Teacher_ID =' + teacher_id + ';'
+    cursor.execute(sql)
+    return cursor.fetchall()
+
+
+def count(cursor, article_id):
+    global years
+    sql = 'select time from search_article.search_result where Article_ID =' + article_id + ';'
+    cursor.execute(sql)
+    temp = cursor.fetchall()
+    temp = str(temp).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+    temp = '0' + temp
+    temp = int(temp)
+    print(temp)
+    if temp >= years:
+        return 1
+    else:
+        return 0
+
+
+def updata(cursor, sum, teacher_id):
+    sql = 'update search_article.teacher set first_resent_seven=%s where Teacher_ID =' + teacher_id + ';'
+    try:
+        cursor.execute(sql, sum)
+    except Exception as e:
+        print("error is " + str(e))
+    return
+
+
+if __name__ == '__main__':
+    connect = pymysql.connect(host='localhost', port=3306, user='root', passwd='', db='Search_article', charset='utf8')
+    cursor = connect.cursor()
+    # 存放老师的ID
+    q = queue.Queue()
+    temps = select_teacher(cursor)
+    q_article = queue.Queue()
+    q_author = queue.Queue()
+    search = queue.Queue()
+    for i in range(len(temps)):
+        temp = str(temps[i]).replace(",", "").replace("'", "").replace("(", "'").replace(")", "'")
+        q.put(temp)
+    # 取老师ID
+    while not q.empty():
+        sum = 0
+        # 取改作者的论文
+        teacher_id = q.get()
+        articles = select_article(cursor, teacher_id)
+        for i in range(len(articles)):
+            article = str(articles[i]).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+            print(article)
+            q_article.put(article)
+        # 取文章的作者为第几作者放入q_author
+        authors = select_author(cursor, teacher_id)
+        for i in range(len(authors)):
+            author = str(authors[i]).replace(",", "").replace("'", "").replace("(", "").replace(")", "")
+            print(author)
+            q_author.put(author)
+        # 把是一作者的文章放入search队列
+        while not q_article.empty():
+            temp_article = q_article.get()
+            temp_author = q_author.get()
+            temp_author = int(temp_author)
+            if temp_author == 1:
+                print(temp_article)
+                search.put(temp_article)
+        print("-----------------")
+        # 取出符合要求的论文编号查询时间
+        while not search.empty():
+            article_id = search.get()
+            if(count(cursor, article_id)):
+                sum = sum + 1
+        print(sum)
+        print("***********************")
+        updata(cursor, sum, teacher_id)
